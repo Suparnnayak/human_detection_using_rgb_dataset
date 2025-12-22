@@ -1,0 +1,38 @@
+# SAR-Optimized Hyperparameters
+# Optimized for small objects, high recall, UAV aerial imagery
+
+# Learning rate (slightly lower for stability with small objects)
+lr0: 0.008
+lrf: 0.008
+momentum: 0.937
+weight_decay: 0.0005
+warmup_epochs: 5.0  # Longer warmup for small objects
+warmup_momentum: 0.8
+warmup_bias_lr: 0.1
+
+# Augmentation (enhanced for aerial imagery)
+hsv_h: 0.02  # Slightly more color variation
+hsv_s: 0.8   # More saturation variation
+hsv_v: 0.5   # More brightness variation
+degrees: 5.0  # Allow slight rotation
+translate: 0.15  # More translation (simulates camera movement)
+scale: 0.6   # More scale variation (different altitudes)
+shear: 2.0   # Slight shear
+perspective: 0.0001  # Minimal perspective (aerial is mostly top-down)
+flipud: 0.0  # No vertical flip (aerial context matters)
+fliplr: 0.5  # Horizontal flip OK
+mosaic: 1.0  # Keep mosaic for small object training
+mixup: 0.1   # Light mixup
+copy_paste: 0.1  # Light copy-paste for small objects
+
+# Loss weights (prioritize detection over classification)
+box: 8.0     # Higher box loss weight
+cls: 0.4     # Lower cls weight (single class)
+dfl: 1.5
+
+# Training
+epochs: 200   # More epochs for small objects
+batch: 16
+imgsz: 1280   # Larger image size for small objects (if GPU allows, else 640)
+patience: 100  # More patience
+

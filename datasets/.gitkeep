@@ -1,0 +1,4 @@
+# Datasets directory
+# Place your YOLO-formatted datasets here
+# Structure: datasets/your_dataset/images/train, images/val, labels/train, labels/val
+

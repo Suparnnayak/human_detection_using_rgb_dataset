@@ -1,0 +1,20 @@
+# YOLO Dataset Configuration Template
+# Replace paths with your actual dataset locations
+
+# Dataset paths (relative to project root or absolute paths)
+train: datasets/your_dataset/images/train
+val: datasets/your_dataset/images/val
+test: datasets/your_dataset/images/test  # optional
+
+# Number of classes
+nc: 1
+
+# Class names
+names:
+  0: person
+
+# Additional metadata
+# dataset_type: rgb  # or 'thermal'
+# image_size: 640
+# augment: true
+
