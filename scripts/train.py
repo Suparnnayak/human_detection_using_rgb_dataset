@@ -49,6 +49,8 @@ def train_yolo(
     """
     # Validate paths
     data_path = Path(data_yaml)
+    if not data_path.is_absolute():
+        data_path = Path.cwd() / data_path
     if not data_path.exists():
         raise FileNotFoundError(f"Dataset config not found: {data_yaml}")
     
@@ -63,16 +65,72 @@ def train_yolo(
             print(f"Warning: Hyperparameter file not found: {hyp_yaml}, using defaults")
     
     # Auto-detect device
-    if device == 'auto':
-        device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    try:
+        cuda_available = torch.cuda.is_available()
+    except Exception as e:
+        print(f"Error checking CUDA: {e}")
+        cuda_available = False
     
-    print(f"Training on device: {device}")
+    if device == 'auto':
+        if cuda_available:
+            device = '0'  # Use first GPU explicitly
+            print(f"GPU detected: {torch.cuda.get_device_name(0)}")
+        else:
+            device = 'cpu'
+            print("="*60)
+            print("WARNING: No GPU detected!")
+            print("PyTorch version:", torch.__version__)
+            if '+cpu' in torch.__version__:
+                print("CPU-only PyTorch installed. Training will be slow.")
+                print("To enable GPU: pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121")
+            print("="*60)
+    elif device == 'cuda' or device == '0':
+        # Check if CUDA is actually available
+        if not cuda_available:
+            print("="*60)
+            print("WARNING: GPU requested but not available!")
+            print("PyTorch version:", torch.__version__)
+            print("CUDA available:", cuda_available)
+            if '+cpu' in torch.__version__:
+                print("\nTo fix: Install CUDA PyTorch:")
+                print("  pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121")
+            print("\nFalling back to CPU (much slower)...")
+            print("="*60)
+            device = 'cpu'
+        else:
+            device = '0'  # Use first GPU
+            print(f"Using GPU: {torch.cuda.get_device_name(0)}")
+    
+    print(f"\nTraining on device: {device} ({'GPU' if device != 'cpu' else 'CPU'})")
     print(f"Model: {model_size}")
     print(f"Dataset: {data_yaml}")
     print(f"Epochs: {epochs}, Batch: {batch}, Image size: {imgsz}")
     
+    # Handle resume logic
+    resume_path = None
+    if resume:
+        # Try to find the last checkpoint in the training directory
+        train_dir = Path(project) / name
+        if train_dir.exists():
+            # Look for last.pt (most recent checkpoint)
+            last_pt = train_dir / 'weights' / 'last.pt'
+            if last_pt.exists():
+                resume_path = str(last_pt)
+                print(f"Resuming from checkpoint: {resume_path}")
+            else:
+                print(f"Warning: No checkpoint found at {last_pt}")
+                print("Starting fresh training instead of resuming.")
+                resume = False
+        else:
+            print(f"Warning: Training directory {train_dir} does not exist.")
+            print("Starting fresh training instead of resuming.")
+            resume = False
+    
     # Initialize model
-    model = YOLO(f"{model_size}.pt")  # Load pretrained weights
+    if resume_path:
+        model = YOLO(resume_path)  # Load from checkpoint
+    else:
+        model = YOLO(f"{model_size}.pt")  # Load pretrained weights
     
     # Prepare training arguments
     train_args = {
@@ -83,13 +141,20 @@ def train_yolo(
         'device': device,
         'project': project,
         'name': name,
-        'resume': resume,
+        'workers': 0,  # Windows compatibility: 0 = main process only, avoids multiprocessing issues
         **kwargs
     }
     
-    # Add hyperparameters if provided
+    # Only set resume if we have a valid checkpoint path
+    if resume_path:
+        train_args['resume'] = True
+    
+    # Add hyperparameters if provided (merge into train_args, not as 'hyp' key)
     if hyp:
-        train_args['hyp'] = hyp
+        # Remove non-hyperparameter keys that shouldn't be passed
+        hyp_filtered = {k: v for k, v in hyp.items() if k not in ['epochs', 'batch', 'imgsz', 'patience']}
+        train_args.update(hyp_filtered)
+        print(f"Applied {len(hyp_filtered)} hyperparameters from config")
     
     # Stage-specific configurations
     if stage == 2:

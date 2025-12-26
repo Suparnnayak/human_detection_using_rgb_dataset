@@ -66,7 +66,20 @@ def validate_dataset(data_yaml_path: str) -> Tuple[bool, List[str]]:
             else:
                 # Check for images and labels
                 image_dir = path
-                label_dir = path.parent.parent / 'labels' / path.name
+                # Labels are at the same level as images directory
+                # For Manipal-UAV: if images are at train/images/images, labels are at train/labels/labels
+                # So we go up from images/images to train, then to labels/labels
+                if 'images' in str(path):
+                    # Remove 'images' or 'images/images' from path to get to parent
+                    label_base = path.parent
+                    while label_base.name == 'images':
+                        label_base = label_base.parent
+                    label_dir = label_base / 'labels' / 'labels'
+                else:
+                    # Standard structure: labels at same level
+                    label_dir = path.parent / 'labels' / path.name
+                    if not label_dir.exists():
+                        label_dir = path.parent / 'labels' / 'labels'
                 
                 if not image_dir.exists():
                     errors.append(f"Image directory not found: {image_dir}")
@@ -118,27 +131,46 @@ def count_dataset_statistics(data_yaml_path: str) -> Dict[str, Any]:
         for split in ['train', 'val']:
             if split in data_config:
                 path = Path(data_config[split])
+                
+                # Find label directory even if images don't exist yet
+                if 'images' in str(path):
+                    # Remove 'images' or 'images/images' from path to get to parent
+                    label_base = path.parent
+                    while label_base.name == 'images':
+                        label_base = label_base.parent
+                    label_dir = label_base / 'labels' / 'labels'
+                else:
+                    # Standard structure: labels at same level
+                    label_dir = path.parent / 'labels' / path.name
+                    if not label_dir.exists():
+                        label_dir = path.parent / 'labels' / 'labels'
+                
+                # Count images (if path exists)
                 if path.exists():
                     image_dir = path
-                    label_dir = path.parent.parent / 'labels' / path.name
-                    
-                    # Count images
                     images = list(image_dir.glob('*.jpg')) + list(image_dir.glob('*.png'))
                     stats[f'{split}_images'] = len(images)
+                else:
+                    stats[f'{split}_images'] = 0
+                
+                # Count labels and classes (always check, even if images don't exist)
+                if label_dir.exists():
+                    labels = list(label_dir.glob('*.txt'))
+                    stats[f'{split}_labels'] = len(labels)
                     
-                    # Count labels and classes
-                    if label_dir.exists():
-                        labels = list(label_dir.glob('*.txt'))
-                        stats[f'{split}_labels'] = len(labels)
-                        
-                        # Count class occurrences
-                        for label_file in labels:
+                    # Count class occurrences
+                    for label_file in labels:
+                        try:
                             with open(label_file, 'r') as f:
                                 for line in f:
                                     parts = line.strip().split()
                                     if parts:
                                         class_id = int(parts[0])
                                         stats['classes'][class_id] = stats['classes'].get(class_id, 0) + 1
+                        except Exception:
+                            pass
+                else:
+                    stats[f'{split}_labels'] = 0
     except Exception as e:
         print(f"Error counting statistics: {e}")
     

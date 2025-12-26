@@ -1,10 +1,11 @@
-# YOLO Dataset Configuration Template
-# Replace paths with your actual dataset locations
+# YOLO Dataset Configuration for Manipal-UAV Person Detection Dataset
+# Dataset paths (relative to project root)
 
-# Dataset paths (relative to project root or absolute paths)
-train: datasets/your_dataset/images/train
-val: datasets/your_dataset/images/val
-test: datasets/your_dataset/images/test  # optional
+# Image directories (absolute paths from project root)
+# Note: Train images are directly in images/, validation/test are in images/images/
+train: D:/SAR using rgb dataset/datasets/Manipal-UAV Person Detection Dataset/train/images
+val: D:/SAR using rgb dataset/datasets/Manipal-UAV Person Detection Dataset/validation/images/images
+test: D:/SAR using rgb dataset/datasets/Manipal-UAV Person Detection Dataset/test/images/images  # optional
 
 # Number of classes
 nc: 1
@@ -14,7 +15,7 @@ names:
   0: person
 
 # Additional metadata
-# dataset_type: rgb  # or 'thermal'
-# image_size: 640
-# augment: true
+dataset_type: rgb
+image_size: 640
+augment: true
 

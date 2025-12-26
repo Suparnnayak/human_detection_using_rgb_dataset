@@ -10,10 +10,63 @@ from ultralytics import YOLO
 import json
 from datetime import datetime
 import sys
+import numpy as np
 
 # Add parent directory to path for tracking import
 sys.path.append(str(Path(__file__).parent.parent))
 from tracking.tracker import SORTTracker
+
+
+def _iou(box1, box2):
+    """Calculate IoU between two boxes."""
+    x1_1, y1_1, x2_1, y2_1 = box1
+    x1_2, y1_2, x2_2, y2_2 = box2
+    
+    # Intersection
+    x1_i = max(x1_1, x1_2)
+    y1_i = max(y1_1, y1_2)
+    x2_i = min(x2_1, x2_2)
+    y2_i = min(y2_1, y2_2)
+    
+    if x2_i < x1_i or y2_i < y1_i:
+        return 0.0
+    
+    inter_area = (x2_i - x1_i) * (y2_i - y1_i)
+    box1_area = (x2_1 - x1_1) * (y2_1 - y1_1)
+    box2_area = (x2_2 - x1_2) * (y2_2 - y1_2)
+    union_area = box1_area + box2_area - inter_area
+    
+    return inter_area / union_area if union_area > 0 else 0.0
+
+
+def _remove_duplicate_detections(detections, iou_threshold=0.5):
+    """Remove duplicate detections with high IoU overlap."""
+    if len(detections) <= 1:
+        return detections
+    
+    # Sort by confidence (highest first)
+    sorted_dets = sorted(detections, key=lambda x: x['confidence'], reverse=True)
+    filtered = []
+    used = [False] * len(sorted_dets)
+    
+    for i, det1 in enumerate(sorted_dets):
+        if used[i]:
+            continue
+        
+        filtered.append(det1)
+        used[i] = True
+        
+        # Mark overlapping detections as used
+        for j, det2 in enumerate(sorted_dets[i+1:], start=i+1):
+            if used[j]:
+                continue
+            
+            iou = _iou(det1['bbox'], det2['bbox'])
+            if iou > iou_threshold:
+                # Keep the one with higher confidence (already added)
+                used[j] = True
+    
+    return filtered
 
 
 def inference_video(
@@ -27,7 +80,10 @@ def inference_video(
     save_json=True,
     display=False,
     fps_output=None,
-    line_thickness=2
+    line_thickness=2,
+    min_box_area=100,
+    max_box_area=None,
+    aspect_ratio_range=(0.2, 5.0)
 ):
     """
     Run inference on a video file.
@@ -122,15 +178,45 @@ def inference_video(
             confidences = result.boxes.conf.cpu().numpy()
             classes = result.boxes.cls.cpu().numpy().astype(int)
             
-            # Prepare detections for tracking or direct use
+            # Prepare detections for tracking or direct use with filtering
             detection_list = []
             for box, conf, cls in zip(boxes, confidences, classes):
+                x1, y1, x2, y2 = box
+                w = x2 - x1
+                h = y2 - y1
+                area = w * h
+                aspect_ratio = w / h if h > 0 else 0
+                
+                # Filter by size and aspect ratio
+                if area < min_box_area:
+                    continue  # Too small, likely false positive
+                
+                if max_box_area and area > max_box_area:
+                    continue  # Too large, likely false positive
+                
+                if aspect_ratio < aspect_ratio_range[0] or aspect_ratio > aspect_ratio_range[1]:
+                    continue  # Unrealistic aspect ratio for person
+                
+                # Additional filters for UAV perspective
+                # Minimum width and height (very small boxes are likely noise)
+                if w < 10 or h < 10:
+                    continue
+                
+                # Maximum width and height (unrealistic for person from UAV)
+                if w > width * 0.5 or h > height * 0.5:
+                    continue
+                
                 detection_list.append({
                     'bbox': box.tolist(),
                     'confidence': float(conf),
                     'class': int(cls),
                     'class_name': model.names[cls]
                 })
+            
+            # Remove duplicate/overlapping detections (same person detected multiple times)
+            # YOLO does NMS, but we add extra filtering for edge cases where same person has multiple boxes
+            if len(detection_list) > 1:
+                detection_list = _remove_duplicate_detections(detection_list, iou_threshold=0.5)
             
             # Apply tracking if enabled
             if tracker:
@@ -156,11 +242,17 @@ def inference_video(
             for det in detections:
                 if 'track_id' in det:
                     x1, y1, x2, y2 = det['bbox']
+                    # Validate bbox coordinates
+                    if np.isnan(x1) or np.isnan(y1) or np.isnan(x2) or np.isnan(y2):
+                        continue
                     track_id = det['track_id']
+                    # Ensure coordinates are valid integers
+                    x1_int = max(0, int(x1))
+                    y1_int = max(0, int(y1) - 10)
                     cv2.putText(
                         annotated_frame,
                         f"ID: {track_id}",
-                        (int(x1), int(y1) - 10),
+                        (x1_int, y1_int),
                         cv2.FONT_HERSHEY_SIMPLEX,
                         0.6,
                         (0, 255, 0),
@@ -239,6 +331,18 @@ def main():
                         help='Output video FPS (default: same as input)')
     parser.add_argument('--line-thickness', type=int, default=2,
                         help='Bounding box line thickness')
+    parser.add_argument('--min-box-area', type=int, default=100,
+                        help='Minimum bounding box area (pixels) to filter small false positives')
+    parser.add_argument('--max-box-area', type=int, default=None,
+                        help='Maximum bounding box area (pixels) to filter large false positives')
+    parser.add_argument('--aspect-ratio-min', type=float, default=0.2,
+                        help='Minimum aspect ratio (width/height) for person detection')
+    parser.add_argument('--aspect-ratio-max', type=float, default=5.0,
+                        help='Maximum aspect ratio (width/height) for person detection')
+    parser.add_argument('--remove-duplicates', action='store_true', default=True,
+                        help='Remove duplicate/overlapping detections (default: True)')
+    parser.add_argument('--duplicate-iou', type=float, default=0.5,
+                        help='IoU threshold for duplicate detection removal')
     
     args = parser.parse_args()
     
@@ -253,7 +357,10 @@ def main():
         save_json=not args.no_save_json,
         display=args.display,
         fps_output=args.fps_output,
-        line_thickness=args.line_thickness
+        line_thickness=args.line_thickness,
+        min_box_area=args.min_box_area,
+        max_box_area=args.max_box_area,
+        aspect_ratio_range=(args.aspect_ratio_min, args.aspect_ratio_max)
     )
 
 

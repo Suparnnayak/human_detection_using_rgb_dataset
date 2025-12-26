@@ -1,5 +1,6 @@
-# SAR-Optimized Hyperparameters
+# SAR-Optimized Hyperparameters for Raspberry Pi
 # Optimized for small objects, high recall, UAV aerial imagery
+# Reduced epochs and image size for faster training
 
 # Learning rate (slightly lower for stability with small objects)
 lr0: 0.008
@@ -30,9 +31,6 @@ box: 8.0     # Higher box loss weight
 cls: 0.4     # Lower cls weight (single class)
 dfl: 1.5
 
-# Training (epochs, batch, imgsz should be set via command line, not here)
-# epochs: 200   # Set via --epochs argument
-# batch: 16     # Set via --batch argument  
-# imgsz: 1280   # Set via --imgsz argument (640 for Pi, 1280 if GPU has memory)
+# Training (set via command line)
 patience: 100  # More patience for small objects
 

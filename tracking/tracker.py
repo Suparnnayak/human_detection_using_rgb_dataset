@@ -98,7 +98,10 @@ class Track:
         
         # Initialize Kalman filter
         self.kf = KalmanFilter()
-        self.kf.x[:4] = [cx, cy, s, r]
+        self.kf.x[0, 0] = cx
+        self.kf.x[1, 0] = cy
+        self.kf.x[2, 0] = s
+        self.kf.x[3, 0] = r
         
         # Store detection info
         self.detection = detection.copy()
@@ -131,9 +134,29 @@ class Track:
         state = self.kf.get_state()
         cx, cy, s, r = state
         
+        # Validate state values
+        if np.isnan(cx) or np.isnan(cy) or np.isnan(s) or np.isnan(r):
+            # Return previous detection bbox if state is invalid
+            return self.detection['bbox']
+        
+        # Ensure s and r are positive
+        s = max(s, 0.1)
+        r = max(r, 0.1)
+        
         # Convert back to [x1, y1, x2, y2]
-        w = np.sqrt(s * r)
-        h = s / w if w > 0 else 0
+        # s = w * h, r = w / h, so w = sqrt(s * r), h = s / w
+        area_product = s * r
+        if area_product < 0:
+            # Fallback to previous bbox
+            return self.detection['bbox']
+        
+        w = np.sqrt(area_product)
+        h = s / w if w > 0 else np.sqrt(s / r) if r > 0 else 10.0
+        
+        # Ensure minimum dimensions
+        w = max(w, 5.0)
+        h = max(h, 5.0)
+        
         x1 = cx - w / 2
         y1 = cy - h / 2
         x2 = cx + w / 2
@@ -195,10 +218,10 @@ class SORTTracker:
     def _associate_detections_to_tracks(self, detections, track_predictions):
         """Associate detections to tracks using IoU."""
         if len(track_predictions) == 0:
-            return [], list(range(len(detections)))
+            return [], list(range(len(detections))), []
         
         if len(detections) == 0:
-            return list(range(len(track_predictions))), []
+            return [], [], list(range(len(track_predictions)))
         
         # Compute IoU matrix
         iou_matrix = np.zeros((len(track_predictions), len(detections)))
